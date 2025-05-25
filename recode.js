@@ -82,13 +82,13 @@ const positionManagerAbi = [{"inputs":[{"components":[{"internalType":"address",
 
 // --- Opsi Transaksi ---
 const swapPairOptions = [
-    { from: 'WPHRS', to: 'USDC', amount: 0.0001 }, { from: 'WPHRS', to: 'USDT', amount: 0.0001 },
-    { from: 'USDC', to: 'WPHRS', amount: 0.0001 }, { from: 'USDT', to: 'WPHRS', amount: 0.0001 },
-    { from: 'USDC', to: 'USDT', amount: 0.0001 }, { from: 'USDT', to: 'USDC', amount: 0.0001 },
+    { from: 'WPHRS', to: 'USDC', amount: 0.01 }, { from: 'WPHRS', to: 'USDT', amount: 0.0001 },
+    { from: 'USDC', to: 'WPHRS', amount: 0.01 }, { from: 'USDT', to: 'WPHRS', amount: 0.0001 },
+    { from: 'USDC', to: 'USDT', amount: 0.01 }, { from: 'USDT', to: 'USDC', amount: 0.0001 },
 ];
 const lpPairOptions = [
-    { token0: 'WPHRS', token1: 'USDC', amount0: 0.0001, amount1: 0.0001, fee: 3000 },
-    { token0: 'WPHRS', token1: 'USDT', amount0: 0.0001, amount1: 0.0001, fee: 3000 },
+    { token0: 'WPHRS', token1: 'USDC', amount0: 0.001, amount1: 0.0001, fee: 3000 },
+    { token0: 'WPHRS', token1: 'USDT', amount0: 0.001, amount1: 0.0001, fee: 3000 },
 ];
 const transferAmountPHRS = 0.000001;
 const wrapAmountPHRS = { min: 0.001, max: 0.005 };
