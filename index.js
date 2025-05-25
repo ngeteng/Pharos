@@ -29,7 +29,7 @@ const logger = {
   banner: () => {
     console.log(`${colors.cyan}${colors.bold}`);
     console.log('-------------------------------------------------');
-    console.log(' Pharos Testnet Auto Bot - Airdrop Insiders (v3.1)');
+    console.log(' Pharos Testnet Auto Bot - Airdrop Insiders (v3.2)');
     console.log('-------------------------------------------------');
     console.log(`${colors.reset}\n`);
   },
@@ -139,25 +139,36 @@ async function tryWithRetry(action, actionName = 'Action', retries = 3, delayMs 
             return await action();
         } catch (error) {
             const errorMessage = error.message.toLowerCase();
-            const errorCode = error.error?.code || error.code;
-            const isRpcError = errorMessage.includes('-32008') || errorCode === 'SERVER_ERROR' || errorCode === -32008 || errorMessage.includes('unable to complete the request') || errorMessage.includes('timeout') || errorMessage.includes('server response 500');
-            const isApiError = error.isAxiosError && error.response && error.response.status >= 400; // Deteksi error API dari Axios
+            const errorCode = error.error?.code || error.code; // Ethers-specific error code
+            const axiosErrorCode = error.isAxiosError && error.response ? error.response.status : null; // HTTP status code from Axios
 
-            if ((isRpcError || isApiError) && i < retries - 1) {
+            const isRpcOrKnownApiError = 
+                errorMessage.includes('-32008') || // Ethers RPC error
+                errorCode === 'SERVER_ERROR' || // Ethers server error
+                errorCode === -32008 || // Ethers specific code for some RPC errors
+                errorMessage.includes('unable to complete the request') ||
+                errorMessage.includes('timeout') || // Generic timeout
+                errorMessage.includes('server response 500') || // Ethers server error
+                (axiosErrorCode && axiosErrorCode >= 500) || // Axios: Server-side errors (5xx)
+                (axiosErrorCode === 403 && errorMessage.includes("referer")) || // Specific API error for referer
+                (axiosErrorCode === 429); // Too Many Requests
+
+            if (isRpcOrKnownApiError && i < retries - 1) {
                 logger.warn(`[Retry ${i + 1}/${retries}] ${actionName} failed. Retrying in ${delayMs / 1000}s... Error: ${error.message}`);
                 await sleep(delayMs);
             } else {
-                if (isRpcError || isApiError) { 
+                if (isRpcOrKnownApiError) { 
                     logger.error(`${actionName} failed after ${retries} retries: ${error.message}`);
                 } else { 
                     logger.error(`${actionName} failed with non-retriable error: ${error.message}`);
                 }
-                throw error;
+                throw error; // Re-throw the error to be caught by the outer try-catch if necessary
             }
         }
     }
-    logger.error(`${actionName} ultimately failed after ${retries} retries.`);
-    throw new Error(`${actionName} ultimately failed after ${retries} retries.`);
+    // This part should ideally not be reached if the loop logic is correct
+    logger.error(`${actionName} ultimately failed after ${retries} retries (fallback).`);
+    throw new Error(`${actionName} ultimately failed after ${retries} retries (fallback).`);
 }
 
 
@@ -199,7 +210,10 @@ const getRandomProxy = (proxies) => proxies[Math.floor(Math.random() * proxies.l
 const setupProvider = (proxy = null) => {
   if (proxy) {
     logger.info(`Using proxy: ${proxy}`);
-    const agent = new HttpsProxyAgent(proxy);
+    // Note: HttpsProxyAgent for ethers.JsonRpcProvider might not work as expected for the RPC connection itself.
+    // It's primarily for HTTP/HTTPS requests made by libraries like Axios.
+    // For RPC, the proxy needs to be a SOCKS5 or HTTP proxy that the RPC URL itself can be tunneled through,
+    // or ethers needs a custom fetcher. For now, this setup is more for Axios.
     return new ethers.JsonRpcProvider(networkConfig.rpcUrl, undefined, { 
       batchMaxCount: 1, 
       staticNetwork: ethers.Network.from(networkConfig.chainId), 
@@ -233,7 +247,7 @@ const checkBalanceAndApproval = async (wallet, tokenAddress, amount, decimals, s
                 const txOptions = await getTxOptions(wallet.provider, estimatedGas);
                 const approveTx = await tokenContract.approve(spender, ethers.MaxUint256, txOptions);
                 const receipt = await approveTx.wait();
-                if (!receipt || receipt.status === 0) { // Ditambahkan pengecekan status receipt
+                if (!receipt || receipt.status === 0) { 
                     throw new Error(`Approval transaction for ${tokenSymbol} failed on-chain. Hash: ${receipt ? receipt.hash : 'N/A'}`);
                 }
             };
@@ -265,7 +279,7 @@ const commonApiHeaders = (jwt = null) => {
     if (jwt) {
         headers.authorization = `Bearer ${jwt}`;
     } else {
-        headers.authorization = "Bearer null"; // Untuk login awal
+        headers.authorization = "Bearer null"; 
     }
     return headers;
 };
@@ -299,7 +313,7 @@ const verifyTask = async (wallet, proxy, jwt, txHash) => {
   try {
     logger.step(`Verifying task ID 103 for tx: ${txHash.substring(0,10)}...`);
     const verifyUrl = `https://api.pharosnetwork.xyz/task/verify?address=${wallet.address}&task_id=103&tx_hash=${txHash}`;
-    const headers = { ...commonApiHeaders(jwt), priority: "u=1, i" }; // Tambahkan priority jika masih ada
+    const headers = { ...commonApiHeaders(jwt), priority: "u=1, i" }; 
     const axiosConfig = { method: 'post', url: verifyUrl, headers, httpsAgent: proxy ? new HttpsProxyAgent(proxy) : null, timeout: 20000 };
     const action = async () => { logger.loading('Sending task verification request...'); return await axios(axiosConfig); };
     const response = await tryWithRetry(action, `Verify Task ${txHash.substring(0,10)}`);
@@ -450,7 +464,7 @@ const claimFaucet = async (wallet, proxy = null) => {
         const message = "pharos";
         const signature = await wallet.signMessage(message);
         const loginUrl = `https://api.pharosnetwork.xyz/user/login?address=${wallet.address}&signature=${signature}&invite_code=S6NGMzXSCDBxhnwo`;
-        const headers = commonApiHeaders(); // JWT null untuk login awal
+        const headers = commonApiHeaders(); 
         const axiosConfigLogin = { method: 'post', url: loginUrl, headers, httpsAgent: proxy ? new HttpsProxyAgent(proxy) : null, timeout: 30000 };
         
         let loginData;
@@ -471,7 +485,7 @@ const claimFaucet = async (wallet, proxy = null) => {
         logger.success(`Login for faucet successful.`);
 
         const statusUrl = `https://api.pharosnetwork.xyz/faucet/status?address=${wallet.address}`;
-        const statusHeaders = commonApiHeaders(jwt); // Gunakan JWT di sini
+        const statusHeaders = commonApiHeaders(jwt); 
         const axiosConfigStatus = { method: 'get', url: statusUrl, headers: statusHeaders, httpsAgent: proxy ? new HttpsProxyAgent(proxy) : null, timeout: 30000 };
         
         let statusData;
@@ -523,8 +537,8 @@ const performCheckIn = async (wallet, proxy = null) => {
             const message = "pharos";
             const signature = await wallet.signMessage(message);
             const loginUrl = `https://api.pharosnetwork.xyz/user/login?address=${wallet.address}&signature=${signature}&invite_code=S6NGMzXSCDBxhnwo`;
-            const headers = commonApiHeaders();
-            const axiosConfigLogin = { method: 'post', url: loginUrl, headers, httpsAgent: proxy ? new HttpsProxyAgent(proxy) : null, timeout: 30000 };
+            const headersLogin = commonApiHeaders(); // JWT null untuk login
+            const axiosConfigLogin = { method: 'post', url: loginUrl, headers: headersLogin, httpsAgent: proxy ? new HttpsProxyAgent(proxy) : null, timeout: 30000 };
             
             let loginData;
             try {
@@ -532,18 +546,21 @@ const performCheckIn = async (wallet, proxy = null) => {
                 const loginResponse = await axios(axiosConfigLogin);
                 loginData = loginResponse.data;
             } catch (axiosError) {
+                // Jika login gagal, lempar error agar tryWithRetry bisa menangani
                 throw new Error(`Login for check-in failed: ${axiosError.message} ${axiosError.response ? JSON.stringify(axiosError.response.data):''}`);
             }
 
             if (loginData.code !== 0 || !loginData.data.jwt) {
+                // Jika API login mengembalikan error, lempar error
                 throw new Error(`Login for check-in API error: ${loginData.msg || 'Unknown error'} (Code: ${loginData.code})`);
             }
-            const jwt = loginData.data.jwt;
+            const jwt = loginData.data.jwt; // JWT berhasil didapatkan
             logger.success(`Login for check-in successful.`);
 
+            // Lanjutkan ke check-in POST
             const checkInUrl = `https://api.pharosnetwork.xyz/sign/in?address=${wallet.address}`;
-            const checkInHeaders = commonApiHeaders(jwt); 
-            const axiosConfigCheckIn = { method: 'post', url: checkInUrl, headers: checkInHeaders, httpsAgent: proxy ? new HttpsProxyAgent(proxy) : null, timeout: 30000 };
+            const headersCheckIn = commonApiHeaders(jwt); // Gunakan JWT yang baru didapat
+            const axiosConfigCheckIn = { method: 'post', url: checkInUrl, headers: headersCheckIn, httpsAgent: proxy ? new HttpsProxyAgent(proxy) : null, timeout: 30000 };
             
             let checkInData;
             try {
@@ -551,21 +568,26 @@ const performCheckIn = async (wallet, proxy = null) => {
                 const checkInResponse = await axios(axiosConfigCheckIn);
                 checkInData = checkInResponse.data;
             } catch (axiosError) {
+                 // Jika check-in POST gagal, lempar error
                  throw new Error(`Check-in request failed: ${axiosError.message} ${axiosError.response ? JSON.stringify(axiosError.response.data):''}`);
             }
             
-            if (checkInData.code === 0) {
+            // Analisis respons check-in POST
+            if (checkInData.code === 0) { // Check-in baru berhasil
                 logger.success(`Check-in successful!`);
-            } else if (checkInData.code === 20002) { 
-                logger.warn(`Already checked in today.`);
+            } else if (checkInData.code === 1 || checkInData.code === 20002) { // API code 1 atau 20002 = "already signed in today"
+                logger.warn(`Already checked in today (API Code: ${checkInData.code}).`);
             } else {
+                 // Error lain dari API check-in POST
                  throw new Error(`Check-in API error: ${checkInData.msg || 'Unknown error'} (Code: ${checkInData.code})`);
             }
-            return jwt; 
+            return jwt; // Selalu kembalikan JWT jika login berhasil, terlepas dari status check-in baru
         };
+        // Mencoba seluruh proses login + check-in dengan retry
         return await tryWithRetry(checkInInnerAction, actionName, 2, 3000); 
     } catch (error) {
-        logger.error(`${actionName} failed (Outer Catch): ${error.message}`);
+        // Jika tryWithRetry gagal setelah semua percobaan, catat error dan kembalikan null
+        logger.error(`${actionName} failed (Outer Catch after retries): ${error.message}`);
         return null;
     }
 };
@@ -662,26 +684,28 @@ const main = async () => {
         for (let pkIdx = 0; pkIdx < privateKeys.length; pkIdx++) {
             const privateKey = privateKeys[pkIdx];
             const currentProxy = proxies.length ? getRandomProxy(proxies) : null;
-            // Buat provider baru di setiap iterasi wallet untuk memastikan proxy (jika ada) diterapkan dengan benar
             const provider = setupProvider(currentProxy); 
             const wallet = new ethers.Wallet(privateKey, provider);
             logger.wallet(`[Wallet ${pkIdx + 1}/${privateKeys.length}] Using: ${wallet.address.substring(0,10)}...`);
+
+            let jwt = null; // Inisialisasi JWT untuk setiap wallet
 
             try {
                 await claimFaucet(wallet, currentProxy);
                 await sleep(Math.random() * (delayActionsMax - delayActionsMin) + delayActionsMin);
 
-                const jwt = await performCheckIn(wallet, currentProxy);
+                // Coba dapatkan JWT dari check-in
+                jwt = await performCheckIn(wallet, currentProxy); // jwt akan null jika performCheckIn gagal total
                 await sleep(Math.random() * (delayActionsMax - delayActionsMin) + delayActionsMin);
 
                 if (jwt) {
                     await getUserInfo(wallet, currentProxy, jwt);
                     await sleep(Math.random() * (delayActionsMax - delayActionsMin) + delayActionsMin);
                 } else {
-                    logger.warn('Skipping actions requiring JWT for this wallet due to failed check-in or login.');
+                    logger.warn('JWT not obtained from check-in. Skipping actions requiring JWT for this wallet.');
                 }
                 
-                // Hanya lanjutkan jika JWT ada, karena verifyTask memerlukannya
+                // Hanya lanjutkan jika JWT ada (berhasil didapatkan dari performCheckIn)
                 if (jwt) {
                     if (numTransfers > 0) { 
                         console.log(`\n${colors.cyan}--- TRANSFERS ---${colors.reset}`);
@@ -711,8 +735,11 @@ const main = async () => {
                             await sleep(Math.random() * (delayActionsMax - delayActionsMin) + delayActionsMin);
                         }
                     }
+                } else {
+                    // Ini tambahan untuk menegaskan kenapa aksi diskip jika JWT tidak ada
+                    logger.info('Skipping on-chain transactions (Transfers, Wraps, Swaps, LPs) as JWT was not available.');
                 }
-                logger.success(`All actions for wallet ${wallet.address.substring(0,10)}... completed.`);
+                logger.success(`All actions for wallet ${wallet.address.substring(0,10)}... completed or skipped as appropriate.`);
             } catch (walletError) {
                 logger.error(`Critical error processing wallet ${wallet.address.substring(0,10)}...: ${walletError.message}. Moving to next.`);
             }
