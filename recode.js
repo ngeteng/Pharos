@@ -282,45 +282,28 @@ const apiVerifyTask = async (walletAddress, jwt, txHash, proxy) => {
 };
 
 const apiGetUserInfo = async (walletAddress, jwt, proxy) => {
-    // 1. Periksa JWT seperti sebelumnya
     if (!jwt) { logger.warn("  ⚠️ Skipping user info fetch: No JWT."); return; }
-
-    // 2. Log alamat wallet yang diterima (untuk debugging)
     logger.info(`  🔍 Debug: Wallet address received for API call: ${walletAddress}`);
-
-    // 3. Log API seperti sebelumnya, tambahkan cek jika walletAddress ada
     logger.api(`📊 Fetching user info for ${walletAddress ? walletAddress.slice(0, 6) : 'UNDEFINED_WALLET'}...`);
-
-    // 4. Bangun URL
     const url = `${API_BASE_URL}/user/profile?address=${walletAddress}`;
-
-    // 5. Log URL yang akan digunakan (untuk debugging)
     logger.info(`  🔍 Debug: Requesting URL: ${url}`);
 
     try {
-        // 6. Tambahkan pemeriksaan eksplisit untuk walletAddress
         if (!walletAddress || typeof walletAddress !== 'string' || !walletAddress.startsWith('0x')) {
             throw new Error(`Invalid or undefined wallet address: ${walletAddress}`);
         }
-
-        // 7. Lakukan panggilan API
         const response = await axios(getAxiosConfig('get', url, jwt, proxy));
-
-        // 8. Proses respons seperti sebelumnya
         if (response.data && response.data.code === 0 && response.data.data && response.data.data.user_info) {
             const userInfo = response.data.data.user_info;
             logger.info(`  🧑 User ID: ${userInfo.ID || 'N/A'}`);
             logger.info(`  ⭐ Task Points: ${userInfo.TaskPoints !== undefined ? userInfo.TaskPoints : 'N/A'}`);
             logger.info(`  🌟 Total Points: ${userInfo.TotalPoints !== undefined ? userInfo.TotalPoints : 'N/A'}`);
-
-            // 9. Panggil pelaporan Telegram (pastikan sudah diimpor)
             await reportToTelegram(logger, walletAddress, userInfo);
 
         } else {
             logger.error(`  ❌ Failed to fetch user info: ${response.data.msg || 'Unknown error or invalid structure'}`);
         }
     } catch (error) {
-        // 10. Log error yang lebih informatif, sertakan URL
         logger.error(`  ❌ User info API request failed for URL [${url}]: ${error.message}`);
     }
 };
