@@ -629,49 +629,48 @@ const processSingleWallet = async (privateKey, proxy, config) => {
     }
 };
 
+
 const main = async () => {
     logger.banner();
     const config = getUserConfig();
 
     logger.info(`⚙️ Configuration:`);
-    console.log(`   - Delay between cycles: ${config.delayBetweenCyclesMinutes} minutes`);
     console.log(`   - Transfers per wallet: ${config.numTransfers}`);
     console.log(`   - Wraps per wallet:   ${config.numWraps}`);
     console.log(`   - Swaps per wallet:   ${config.numSwaps}`);
     console.log(`   - LPs per wallet:     ${config.numLPs}`);
-    console.log(`   - Delay between actions: ${config.delayBetweenActionsMs / 1000}s`);
-    console.log(`   - Delay between wallets: ${config.delayBetweenWalletsMs / 1000}s`);
     logger.separator();
-
 
     const privateKeys = loadFileLines('privateKeys.txt', 'Private Keys');
     const proxies = loadFileLines('proxies.txt', 'Proxies');
 
     if (!privateKeys.length) {
-        logger.error('❌ No private keys found in privateKeys.txt. Please create the file and add one private key per line. Exiting.');
+        logger.error('❌ No private keys found. Exiting.');
         return;
     }
 
     let proxyIndex = 0;
 
-    while (true) {
-        logger.info('🔄 Starting new cycle...');
-        for (const [index, pk] of privateKeys.entries()) {
-            logger.separator(`WALLET ${index + 1}/${privateKeys.length}`);
-            const currentProxy = proxies.length > 0 ? proxies[proxyIndex % proxies.length] : null;
-            if (proxies.length > 0) proxyIndex++; // Rotate proxy for next wallet
+    // Menghapus 'while (true) {'
+    logger.info('🚀 Starting single cycle execution...'); // Mengubah pesan log
+    for (const [index, pk] of privateKeys.entries()) {
+        logger.separator(`WALLET ${index + 1}/${privateKeys.length}`);
+        const currentProxy = proxies.length > 0 ? proxies[proxyIndex % proxies.length] : null;
+        if (proxies.length > 0) proxyIndex++;
 
-            await processSingleWallet(pk, currentProxy, config);
-            
-            if (index < privateKeys.length - 1) {
-                logger.info(`⏳ Waiting ${config.delayBetweenWalletsMs / 1000}s before next wallet...`);
-                await delay(config.delayBetweenWalletsMs);
-            }
+        await processSingleWallet(pk, currentProxy, config);
+        
+        if (index < privateKeys.length - 1) {
+            logger.info(`⏳ Waiting ${config.delayBetweenWalletsMs / 1000}s before next wallet...`);
+            await delay(config.delayBetweenWalletsMs);
         }
-        logger.success('🏁 All wallets processed for this cycle!');
-        logger.separator();
-        await countdownTimer(config.delayBetweenCyclesMinutes);
     }
+    logger.success('🏁 All wallets processed!');
+    logger.info('✅ Script finished. Exiting.'); // Menambah pesan keluar
+    // Menghapus 'await countdownTimer(...);'
+    // Menghapus '}' penutup while
+
+    process.exit(0); // Memastikan skrip benar-benar keluar
 };
 
 main().catch(error => {
