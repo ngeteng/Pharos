@@ -35,7 +35,7 @@ const logger = {
         console.log(`${colors.cyan}${colors.bold}`);
         console.log('=================================================');
         console.log('      🤖 Pharos Testnet Auto Bot 🤖');
-        console.log('           ✨ Airdrop Insiders ✨');
+        console.log('           ✨ Recode By 0x062 ✨');
         console.log(`     Powered by ${colors.magenta}Node.js${colors.cyan} & ${colors.magenta}Ethers.js${colors.cyan}`);
         console.log('=================================================');
         console.log(`${colors.reset}\n`);
