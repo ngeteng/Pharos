@@ -301,7 +301,8 @@ const apiVerifyTask = async (walletAddress, jwt, txHash, proxy, maxAttempts = 5,
             }
 
             // 3. Error Definitif (TX Salah, dll.)
-            if (msg.includes("invalid") || msg.includes("failed") || data.code !== 0 && !msg.includes("pending")) { // Jangan berhenti jika 'pending' meski code != 0 (jika API begitu)
+            const isReceiptFail = msg.includes("get transa") && msg.includes("receipt failed"); // Cek error spesifik ini (handle typo)
+            if (!isReceiptFail && (msg.includes("invalid") || (data.code !== 0 && !msg.includes("pending")))) { // <-- BARIS BARU: Jangan berhenti jika hanya 'receipt failed'
                  logger.error(`    ❌ Task verification failed with definitive message: "${data.msg}". Stopping attempts.`);
                  return false;
             }
