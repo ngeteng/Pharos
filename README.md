@@ -2,7 +2,7 @@
 
 Bot Node.js ini dirancang untuk mengotomatiskan interaksi di **Pharos Testnet**. Bot ini melakukan berbagai tugas mulai dari check-in harian, klaim faucet, hingga transaksi DeFi seperti *swap* dan penambahan likuiditas. Tujuannya adalah untuk membantu pengguna berpartisipasi aktif dalam kegiatan testnet dan mengumpulkan poin.
 
-Dibuat dengan ❤️ oleh **Airdrop Insiders**.
+Recode dengan ❤️ oleh **0x062**.
 
 ---
 
