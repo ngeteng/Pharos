@@ -265,20 +265,68 @@ const apiClaimFaucet = async (walletAddress, jwt, proxy) => {
     } catch (error) { logger.error(`   ❌ Faucet claim process API request failed: ${error.message}`); return false; }
 };
 
-const apiVerifyTask = async (walletAddress, jwt, txHash, proxy) => {
-    if (!jwt) { logger.warn("   ⚠️ Skipping task verification: No JWT."); return false; }
-    logger.api(`   🔍 Verifying task for TX: ${txHash.slice(0, 10)}...`);
+const apiVerifyTask = async (walletAddress, jwt, txHash, proxy, maxAttempts = 5, delayBetweenAttemptsMs = 20000) => {
+    if (!jwt) {
+        logger.warn("  ⚠️ Skipping task verification: No JWT.");
+        return false;
+    }
+
+    logger.api(`  🔍 Verifying task for TX: ${txHash.slice(0, 10)}... (Up to ${maxAttempts} attempts, delay: ${delayBetweenAttemptsMs / 1000}s)`);
     const url = `${API_BASE_URL}/task/verify?address=${walletAddress}&task_id=${TASK_ID_INTERACTION}&tx_hash=${txHash}`;
-    try {
-        const response = await retryOperation(() => axios(getAxiosConfig('post', url, jwt, proxy)), 3, 3000, `Task Verification ${txHash.slice(0, 10)}`);
-        if (response.data.code === 0 && response.data.data.verified) {
-            logger.success(`   ✔️ Task verified successfully for ${txHash.slice(0, 10)}...`);
-            return true;
-        } else {
-            logger.warn(`   ⚠️ Task verification for ${txHash.slice(0,10)} failed or pending: ${response.data.msg || 'Unknown error'}`);
-            return false;
+
+    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+        logger.info(`    Attempt ${attempt}/${maxAttempts}...`);
+        try {
+            // Kita tetap bisa menggunakan retryOperation untuk menangani error jaringan/HTTP dasar
+            const response = await retryOperation(
+                () => axios(getAxiosConfig('post', url, jwt, proxy)),
+                2, // Cukup 2 retry di sini, loop utama yang menangani 'kesabaran'
+                3000,
+                `API Verify Call Attempt ${attempt}`
+            );
+
+            const data = response.data;
+            const msg = (data.msg || 'Unknown API status').toLowerCase();
+
+            // 1. Sukses Verifikasi!
+            if (data.code === 0 && data.data && data.data.verified) {
+                logger.success(`    ✔️ Task verified successfully for ${txHash.slice(0, 10)}!`);
+                return true;
+            }
+
+            // 2. Sudah Diverifikasi Sebelumnya
+            if (msg.includes("already verified") || msg.includes("task has been completed")) {
+                logger.info(`    👍 Task ${txHash.slice(0, 10)} was already verified.`);
+                return true; // Anggap sukses jika sudah pernah
+            }
+
+            // 3. Error Definitif (TX Salah, dll.)
+            if (msg.includes("invalid") || msg.includes("failed") || data.code !== 0 && !msg.includes("pending")) { // Jangan berhenti jika 'pending' meski code != 0 (jika API begitu)
+                 logger.error(`    ❌ Task verification failed with definitive message: "${data.msg}". Stopping attempts.`);
+                 return false;
+            }
+
+            // 4. Belum Siap / Pending (Kasus paling umum)
+            logger.warn(`    ⚠️ Verification attempt ${attempt} - API: "${data.msg || 'Pending/Not yet verified'}".`);
+
+            // Jika bukan upaya terakhir, tunggu
+            if (attempt < maxAttempts) {
+                logger.loading(`    ⏳ Waiting ${delayBetweenAttemptsMs / 1000}s before next attempt...`);
+                await delay(delayBetweenAttemptsMs);
+            }
+
+        } catch (error) {
+            // Ini menangkap error dari retryOperation (error jaringan/HTTP parah)
+            logger.error(`    ❌ Network/Request error during attempt ${attempt}: ${error.message.slice(0, 100)}...`);
+            if (attempt < maxAttempts) {
+                logger.loading(`    ⏳ Waiting ${delayBetweenAttemptsMs / 1000}s after error...`);
+                await delay(delayBetweenAttemptsMs);
+            }
         }
-    } catch (error) { return false; }
+    }
+
+    logger.error(`  ❌ Task verification FAILED for ${txHash.slice(0, 10)} after ${maxAttempts} attempts.`);
+    return false;
 };
 
 const apiGetUserInfo = async (walletAddress, jwt, proxy) => {
@@ -373,12 +421,18 @@ const executeTransaction = async (fnName, contractInteraction, operationDescript
     try {
         const txResponse = await contractInteraction();
         const receipt = await waitForTransactionReceipt(txResponse, operationDescription);
+
         if (receipt && jwt) {
-            await apiVerifyTask(wallet.address, jwt, receipt.hash, proxy);
+            // --- TAMBAHKAN JEDA AWAL DI SINI ---
+            const initialVerificationDelay = 10000; // 10 detik (atau sesuai kebutuhan)
+            logger.loading(`  ⏳ Waiting ${initialVerificationDelay / 1000}s before starting API verification process...`);
+            await delay(initialVerificationDelay);
+            // --- PANGGIL FUNGSI BARU ---
+            await apiVerifyTask(wallet.address, jwt, receipt.hash, proxy); // Memanggil apiVerifyTask yang sudah diupdate
         }
         return receipt;
     } catch (error) {
-        logger.error(`   ❌ ${operationDescription} execution failed: ${error.message}`);
+        logger.error(`  ❌ ${operationDescription} execution failed: ${error.message}`);
         // Log more details if needed, but keep it concise for now
         return null;
     }
