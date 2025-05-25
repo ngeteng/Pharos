@@ -1,6 +1,7 @@
 require('dotenv').config();
 const { ethers } = require('ethers');
 const fs = require('fs');
+const { reportToTelegram } = require('./telegramReporter.js');
 const { HttpsProxyAgent } = require('https-proxy-agent');
 const randomUseragent = require('random-useragent');
 const axios = require('axios');
@@ -281,20 +282,22 @@ const apiVerifyTask = async (walletAddress, jwt, txHash, proxy) => {
 };
 
 const apiGetUserInfo = async (walletAddress, jwt, proxy) => {
-    if (!jwt) { logger.warn("   ⚠️ Skipping user info fetch: No JWT."); return; }
+    if (!jwt) { logger.warn("  ⚠️ Skipping user info fetch: No JWT."); return; }
     logger.api(`📊 Fetching user info for ${walletAddress.slice(0, 6)}...`);
-    const url = `${API_BASE_URL}/user/profile?address=${walletAddress}`;
+    const url = `<span class="math-inline">\{API\_BASE\_URL\}/user/profile?address\=</span>{walletAddress}`;
     try {
         const response = await axios(getAxiosConfig('get', url, jwt, proxy));
         if (response.data && response.data.code === 0 && response.data.data && response.data.data.user_info) {
             const userInfo = response.data.data.user_info;
-            logger.info(`   🧑 User ID: ${userInfo.ID || 'N/A'}`);
-            logger.info(`   ⭐ Task Points: ${userInfo.TaskPoints !== undefined ? userInfo.TaskPoints : 'N/A'}`);
-            logger.info(`   🌟 Total Points: ${userInfo.TotalPoints !== undefined ? userInfo.TotalPoints : 'N/A'}`);
+            logger.info(`  🧑 User ID: ${userInfo.ID || 'N/A'}`);
+            logger.info(`  ⭐ Task Points: ${userInfo.TaskPoints !== undefined ? userInfo.TaskPoints : 'N/A'}`);
+            logger.info(`  🌟 Total Points: ${userInfo.TotalPoints !== undefined ? userInfo.TotalPoints : 'N/A'}`);
+            await reportToTelegram(logger, walletAddress, userInfo);
+
         } else {
-            logger.error(`   ❌ Failed to fetch user info: ${response.data.msg || 'Unknown error or invalid structure'}`);
+            logger.error(`  ❌ Failed to fetch user info: ${response.data.msg || 'Unknown error or invalid structure'}`);
         }
-    } catch (error) { logger.error(`   ❌ User info API request failed: ${error.message}`); }
+    } catch (error) { logger.error(`  ❌ User info API request failed: ${error.message}`); }
 };
 
 // =============================================================================
