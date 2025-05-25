@@ -91,7 +91,7 @@ const lpPairOptions = [
     { token0: 'WPHRS', token1: 'USDT', amount0: 0.001, amount1: 0.0001, fee: 3000 },
 ];
 const transferAmountPHRS = 0.000001;
-const wrapAmountPHRS = { min: 0.001, max: 0.005 };
+const wrapAmountPHRS = { min: 0.01, max: 0.05 };
 
 // =============================================================================
 // 🛠️ Fungsi Utilitas & Pembantu
