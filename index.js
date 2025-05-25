@@ -29,7 +29,7 @@ const logger = {
   banner: () => {
     console.log(`${colors.cyan}${colors.bold}`);
     console.log('-------------------------------------------------');
-    console.log(' Pharos Testnet Auto Bot - Airdrop Insiders (v3)');
+    console.log(' Pharos Testnet Auto Bot - Airdrop Insiders (v3.1)');
     console.log('-------------------------------------------------');
     console.log(`${colors.reset}\n`);
   },
@@ -116,14 +116,13 @@ const positionManagerAbi = [
 ];
 
 // --- Opsi ---
-// PENTING: Verifikasi nilai 'fee' ini dengan pool yang ada di Pharos Testnet!
 const pairOptions = [
-  { id: 1, from: 'WPHRS', to: 'USDC', amount: 0.0001, fee: 3000 }, // Misal 0.3%
-  { id: 2, from: 'WPHRS', to: 'USDT', amount: 0.0001, fee: 3000 }, // Misal 0.3%
-  { id: 3, from: 'USDC', to: 'WPHRS', amount: 0.0001, fee: 3000 }, // Misal 0.3%
-  { id: 4, from: 'USDT', to: 'WPHRS', amount: 0.0001, fee: 3000 }, // Misal 0.3%
-  { id: 5, from: 'USDC', to: 'USDT', amount: 0.0001, fee: 500 },  // Misal 0.05% untuk stable/stable
-  { id: 6, from: 'USDT', to: 'USDC', amount: 0.0001, fee: 500 },  // Misal 0.05% untuk stable/stable
+  { id: 1, from: 'WPHRS', to: 'USDC', amount: 0.0001, fee: 3000 }, 
+  { id: 2, from: 'WPHRS', to: 'USDT', amount: 0.0001, fee: 3000 }, 
+  { id: 3, from: 'USDC', to: 'WPHRS', amount: 0.0001, fee: 3000 }, 
+  { id: 4, from: 'USDT', to: 'WPHRS', amount: 0.0001, fee: 3000 }, 
+  { id: 5, from: 'USDC', to: 'USDT', amount: 0.0001, fee: 500 },  
+  { id: 6, from: 'USDT', to: 'USDC', amount: 0.0001, fee: 500 },  
 ];
 
 const lpOptions = [
@@ -142,21 +141,21 @@ async function tryWithRetry(action, actionName = 'Action', retries = 3, delayMs 
             const errorMessage = error.message.toLowerCase();
             const errorCode = error.error?.code || error.code;
             const isRpcError = errorMessage.includes('-32008') || errorCode === 'SERVER_ERROR' || errorCode === -32008 || errorMessage.includes('unable to complete the request') || errorMessage.includes('timeout') || errorMessage.includes('server response 500');
+            const isApiError = error.isAxiosError && error.response && error.response.status >= 400; // Deteksi error API dari Axios
 
-            if (isRpcError && i < retries - 1) { // Hanya retry jika bukan percobaan terakhir
-                logger.warn(`[Retry ${i + 1}/${retries}] ${actionName} failed with RPC/Server/Timeout error. Retrying in ${delayMs / 1000}s...`);
+            if ((isRpcError || isApiError) && i < retries - 1) {
+                logger.warn(`[Retry ${i + 1}/${retries}] ${actionName} failed. Retrying in ${delayMs / 1000}s... Error: ${error.message}`);
                 await sleep(delayMs);
             } else {
-                if (isRpcError) { // Jika error RPC pada percobaan terakhir
-                    logger.error(`${actionName} failed after ${retries} retries with RPC/Server/Timeout error: ${error.message}`);
-                } else { // Jika error non-RPC
+                if (isRpcError || isApiError) { 
+                    logger.error(`${actionName} failed after ${retries} retries: ${error.message}`);
+                } else { 
                     logger.error(`${actionName} failed with non-retriable error: ${error.message}`);
                 }
                 throw error;
             }
         }
     }
-    // Baris ini seharusnya tidak tercapai jika logic di atas benar, tapi sebagai fallback:
     logger.error(`${actionName} ultimately failed after ${retries} retries.`);
     throw new Error(`${actionName} ultimately failed after ${retries} retries.`);
 }
@@ -201,10 +200,9 @@ const setupProvider = (proxy = null) => {
   if (proxy) {
     logger.info(`Using proxy: ${proxy}`);
     const agent = new HttpsProxyAgent(proxy);
-    return new ethers.JsonRpcProvider(networkConfig.rpcUrl, undefined, { // chainId/name otomatis dari RPC
-      batchMaxCount: 1, // Non-batching bisa lebih stabil dengan beberapa RPC
-      staticNetwork: ethers.Network.from(networkConfig.chainId), // Eksplisit set network
-      // fetchOptions: { agent }, // Ini mungkin tidak berfungsi untuk RPC di semua versi ethers
+    return new ethers.JsonRpcProvider(networkConfig.rpcUrl, undefined, { 
+      batchMaxCount: 1, 
+      staticNetwork: ethers.Network.from(networkConfig.chainId), 
     });
   } else {
     logger.info('Using direct mode (no proxy)');
@@ -235,8 +233,8 @@ const checkBalanceAndApproval = async (wallet, tokenAddress, amount, decimals, s
                 const txOptions = await getTxOptions(wallet.provider, estimatedGas);
                 const approveTx = await tokenContract.approve(spender, ethers.MaxUint256, txOptions);
                 const receipt = await approveTx.wait();
-                if (receipt.status === 0) {
-                    throw new Error(`Approval transaction for ${tokenSymbol} failed on-chain. Hash: ${receipt.hash}`);
+                if (!receipt || receipt.status === 0) { // Ditambahkan pengecekan status receipt
+                    throw new Error(`Approval transaction for ${tokenSymbol} failed on-chain. Hash: ${receipt ? receipt.hash : 'N/A'}`);
                 }
             };
             await tryWithRetry(action, `Approve ${tokenSymbol}`);
@@ -249,11 +247,35 @@ const checkBalanceAndApproval = async (wallet, tokenAddress, amount, decimals, s
     }
 };
 
+const commonApiHeaders = (jwt = null) => {
+    const headers = {
+        accept: "application/json, text/plain, */*",
+        "accept-language": "en-US,en;q=0.8",
+        "sec-ch-ua": '"Chromium";v="136", "Brave";v="136", "Not.A/Brand";v="99"',
+        "sec-ch-ua-mobile": "?0",
+        "sec-ch-ua-platform": '"Windows"',
+        "sec-fetch-dest": "empty",
+        "sec-fetch-mode": "cors",
+        "sec-fetch-site": "same-site",
+        "sec-gpc": "1",
+        Referer: "https://testnet.pharosnetwork.xyz", // TANPA TRAILING SLASH
+        "Referrer-Policy": "strict-origin-when-cross-origin",
+        "User-Agent": randomUseragent.getRandom(),
+    };
+    if (jwt) {
+        headers.authorization = `Bearer ${jwt}`;
+    } else {
+        headers.authorization = "Bearer null"; // Untuk login awal
+    }
+    return headers;
+};
+
+
 const getUserInfo = async (wallet, proxy = null, jwt) => {
   try {
     logger.user(`Fetching user info for wallet: ${wallet.address.substring(0,10)}...`);
     const profileUrl = `https://api.pharosnetwork.xyz/user/profile?address=${wallet.address}`;
-    const headers = { /* ... headers sama ... */ };
+    const headers = commonApiHeaders(jwt);
     const axiosConfig = { method: 'get', url: profileUrl, headers, httpsAgent: proxy ? new HttpsProxyAgent(proxy) : null, timeout: 20000 };
     const action = async () => { logger.loading('Fetching user profile...'); return await axios(axiosConfig); };
     const response = await tryWithRetry(action, 'Fetch User Info');
@@ -277,7 +299,7 @@ const verifyTask = async (wallet, proxy, jwt, txHash) => {
   try {
     logger.step(`Verifying task ID 103 for tx: ${txHash.substring(0,10)}...`);
     const verifyUrl = `https://api.pharosnetwork.xyz/task/verify?address=${wallet.address}&task_id=103&tx_hash=${txHash}`;
-    const headers = { /* ... headers sama, pastikan jwt ada di auth ... */ authorization: `Bearer ${jwt}`, /* ... sisanya ... */ };
+    const headers = { ...commonApiHeaders(jwt), priority: "u=1, i" }; // Tambahkan priority jika masih ada
     const axiosConfig = { method: 'post', url: verifyUrl, headers, httpsAgent: proxy ? new HttpsProxyAgent(proxy) : null, timeout: 20000 };
     const action = async () => { logger.loading('Sending task verification request...'); return await axios(axiosConfig); };
     const response = await tryWithRetry(action, `Verify Task ${txHash.substring(0,10)}`);
@@ -295,7 +317,6 @@ const verifyTask = async (wallet, proxy, jwt, txHash) => {
   }
 };
 
-// Menggunakan fee dari pairOptions
 const getMulticallData = (pair, amount, walletAddress, fee) => {
   try {
     const decimals = tokenDecimals[pair.from];
@@ -304,7 +325,7 @@ const getMulticallData = (pair, amount, walletAddress, fee) => {
       ['address', 'address', 'uint24', 'address', 'uint256', 'uint256', 'uint256'],
       [tokens[pair.from], tokens[pair.to], fee, walletAddress, scaledAmount, 0, 0]
     );
-    return [ethers.concat(['0x04e45aaf', data])]; // Selector untuk exactInputSingle
+    return [ethers.concat(['0x04e45aaf', data])]; 
   } catch (error) {
     logger.error(`Failed to generate multicall data for ${pair.from}->${pair.to}: ${error.message}`);
     return [];
@@ -326,7 +347,7 @@ const performSwap = async (wallet, provider, index, jwt, proxy) => {
             logger.error(`Invalid multicall data for ${actionName}`);
             return;
         }
-        const collectionAndSelfcalls = 0; // Sesuai ABI multicall(uint256, bytes[])
+        const collectionAndSelfcalls = 0; 
 
         const action = async () => {
             let estimatedGas;
@@ -341,8 +362,8 @@ const performSwap = async (wallet, provider, index, jwt, proxy) => {
             const tx = await contract.multicall(collectionAndSelfcalls, multicallDataArray, txOptions);
             logger.loading(`${actionName} tx sent (${tx.hash.substring(0,10)}...), waiting for confirmation...`);
             const receipt = await tx.wait();
-            if (receipt.status === 0) {
-                throw new Error(`${actionName} transaction failed on-chain. Hash: ${receipt.hash}`);
+            if (!receipt || receipt.status === 0) {
+                 throw new Error(`${actionName} transaction failed on-chain. Hash: ${receipt ? receipt.hash : 'N/A'}`);
             }
             logger.success(`${actionName} completed: ${receipt.hash.substring(0,10)}...`);
             logger.step(`Explorer: https://testnet.pharosscan.xyz/tx/${receipt.hash}`);
@@ -363,8 +384,7 @@ const transferPHRS = async (wallet, provider, index, jwt, proxy) => {
     try {
         const balance = await provider.getBalance(wallet.address);
         const requiredValue = ethers.parseEther(amount.toString());
-        // Perkirakan biaya gas sederhana untuk transfer ETH
-        const estimatedGasCost = ethers.parseUnits('0.0005', 'ether'); // Estimasi kasar, bisa disesuaikan
+        const estimatedGasCost = ethers.parseUnits('0.0005', 'ether'); 
 
         if (balance < (requiredValue + estimatedGasCost)) {
             logger.warn(`Skipping ${actionName}: Insufficient PHRS balance (${ethers.formatEther(balance)}) for value and estimated gas.`);
@@ -377,8 +397,8 @@ const transferPHRS = async (wallet, provider, index, jwt, proxy) => {
             const tx = await wallet.sendTransaction({ ...txRequest, ...txOptions });
             logger.loading(`${actionName} tx sent (${tx.hash.substring(0,10)}...), waiting for confirmation...`);
             const receipt = await tx.wait();
-            if (receipt.status === 0) {
-                throw new Error(`${actionName} transaction failed on-chain. Hash: ${receipt.hash}`);
+            if (!receipt || receipt.status === 0) {
+                 throw new Error(`${actionName} transaction failed on-chain. Hash: ${receipt ? receipt.hash : 'N/A'}`);
             }
             logger.success(`${actionName} completed: ${receipt.hash.substring(0,10)}...`);
             logger.step(`Explorer: https://testnet.pharosscan.xyz/tx/${receipt.hash}`);
@@ -398,7 +418,7 @@ const wrapPHRS = async (wallet, provider, index, jwt, proxy) => {
     logger.step(`Preparing ${actionName}`);
     try {
         const balance = await provider.getBalance(wallet.address);
-        const estimatedGasCost = ethers.parseUnits('0.001', 'ether'); // Estimasi kasar
+        const estimatedGasCost = ethers.parseUnits('0.001', 'ether'); 
         if (balance < (amountWei + estimatedGasCost)) {
             logger.warn(`Skipping ${actionName}: Insufficient PHRS balance (${ethers.formatEther(balance)}) for wrap and gas.`);
             return;
@@ -410,8 +430,8 @@ const wrapPHRS = async (wallet, provider, index, jwt, proxy) => {
             const tx = await wphrsContract.deposit({ value: amountWei, ...txOptions });
             logger.loading(`${actionName} tx sent (${tx.hash.substring(0,10)}...), waiting for confirmation...`);
             const receipt = await tx.wait();
-            if (receipt.status === 0) {
-                throw new Error(`${actionName} transaction failed on-chain. Hash: ${receipt.hash}`);
+            if (!receipt || receipt.status === 0) {
+                throw new Error(`${actionName} transaction failed on-chain. Hash: ${receipt ? receipt.hash : 'N/A'}`);
             }
             logger.success(`${actionName} completed: ${receipt.hash.substring(0,10)}...`);
             logger.step(`Explorer: https://testnet.pharosscan.xyz/tx/${receipt.hash}`);
@@ -430,7 +450,7 @@ const claimFaucet = async (wallet, proxy = null) => {
         const message = "pharos";
         const signature = await wallet.signMessage(message);
         const loginUrl = `https://api.pharosnetwork.xyz/user/login?address=${wallet.address}&signature=${signature}&invite_code=S6NGMzXSCDBxhnwo`;
-        const headers = { accept: "application/json, text/plain, */*", authorization: "Bearer null", /* ... sisanya sama ... */ };
+        const headers = commonApiHeaders(); // JWT null untuk login awal
         const axiosConfigLogin = { method: 'post', url: loginUrl, headers, httpsAgent: proxy ? new HttpsProxyAgent(proxy) : null, timeout: 30000 };
         
         let loginData;
@@ -451,7 +471,7 @@ const claimFaucet = async (wallet, proxy = null) => {
         logger.success(`Login for faucet successful.`);
 
         const statusUrl = `https://api.pharosnetwork.xyz/faucet/status?address=${wallet.address}`;
-        const statusHeaders = { ...headers, authorization: `Bearer ${jwt}` };
+        const statusHeaders = commonApiHeaders(jwt); // Gunakan JWT di sini
         const axiosConfigStatus = { method: 'get', url: statusUrl, headers: statusHeaders, httpsAgent: proxy ? new HttpsProxyAgent(proxy) : null, timeout: 30000 };
         
         let statusData;
@@ -488,7 +508,7 @@ const claimFaucet = async (wallet, proxy = null) => {
                 throw new Error(`Faucet claim API error: ${claimData.msg || 'Unknown error'} (Code: ${claimData.code})`);
             }
         };
-        return await tryWithRetry(claimAction, actionName, 2, 3000); // Retry claim 2x
+        return await tryWithRetry(claimAction, actionName, 2, 3000); 
     } catch (error) {
         logger.error(`${actionName} failed (Outer Catch): ${error.message}`);
         return false;
@@ -499,11 +519,11 @@ const performCheckIn = async (wallet, proxy = null) => {
     const actionName = `Daily CheckIn for ${wallet.address.substring(0,10)}...`;
     logger.step(`Attempting ${actionName}`);
     try {
-        const checkInInnerAction = async () => { // Renamed to avoid conflict
+        const checkInInnerAction = async () => { 
             const message = "pharos";
             const signature = await wallet.signMessage(message);
             const loginUrl = `https://api.pharosnetwork.xyz/user/login?address=${wallet.address}&signature=${signature}&invite_code=S6NGMzXSCDBxhnwo`;
-            const headers = { accept: "application/json, text/plain, */*", authorization: "Bearer null", /* ... sisanya sama ... */};
+            const headers = commonApiHeaders();
             const axiosConfigLogin = { method: 'post', url: loginUrl, headers, httpsAgent: proxy ? new HttpsProxyAgent(proxy) : null, timeout: 30000 };
             
             let loginData;
@@ -522,7 +542,7 @@ const performCheckIn = async (wallet, proxy = null) => {
             logger.success(`Login for check-in successful.`);
 
             const checkInUrl = `https://api.pharosnetwork.xyz/sign/in?address=${wallet.address}`;
-            const checkInHeaders = { ...headers, authorization: `Bearer ${jwt}` };
+            const checkInHeaders = commonApiHeaders(jwt); 
             const axiosConfigCheckIn = { method: 'post', url: checkInUrl, headers: checkInHeaders, httpsAgent: proxy ? new HttpsProxyAgent(proxy) : null, timeout: 30000 };
             
             let checkInData;
@@ -536,14 +556,14 @@ const performCheckIn = async (wallet, proxy = null) => {
             
             if (checkInData.code === 0) {
                 logger.success(`Check-in successful!`);
-            } else if (checkInData.code === 20002) { // "You have signed in today"
+            } else if (checkInData.code === 20002) { 
                 logger.warn(`Already checked in today.`);
             } else {
                  throw new Error(`Check-in API error: ${checkInData.msg || 'Unknown error'} (Code: ${checkInData.code})`);
             }
-            return jwt; // Return JWT whether new check-in or already checked-in
+            return jwt; 
         };
-        return await tryWithRetry(checkInInnerAction, actionName, 2, 3000); // Retry check-in process 2x
+        return await tryWithRetry(checkInInnerAction, actionName, 2, 3000); 
     } catch (error) {
         logger.error(`${actionName} failed (Outer Catch): ${error.message}`);
         return null;
@@ -562,7 +582,7 @@ const addLiquidity = async (wallet, provider, index, jwt, proxy) => {
         const amount1Wei = ethers.parseUnits(pair.amount1.toString(), tokenDecimals[pair.token1]);
         const positionManager = new ethers.Contract(tokens.POSITION_MANAGER, positionManagerAbi, wallet);
         const deadline = Math.floor(Date.now() / 1000) + 600;
-        const tickLower = -60000; const tickUpper = 60000; // Wide range for testnet
+        const tickLower = -60000; const tickUpper = 60000; 
 
         const mintParams = {
             token0: tokens[pair.token0], token1: tokens[pair.token1], fee: pair.fee,
@@ -575,8 +595,8 @@ const addLiquidity = async (wallet, provider, index, jwt, proxy) => {
             const tx = await positionManager.mint(mintParams, txOptions);
             logger.loading(`${actionName} tx sent (${tx.hash.substring(0,10)}...), waiting for confirmation...`);
             const receipt = await tx.wait();
-            if (receipt.status === 0) {
-                throw new Error(`${actionName} transaction failed on-chain. Hash: ${receipt.hash}`);
+            if (!receipt || receipt.status === 0) {
+                throw new Error(`${actionName} transaction failed on-chain. Hash: ${receipt ? receipt.hash : 'N/A'}`);
             }
             logger.success(`${actionName} completed: ${receipt.hash.substring(0,10)}...`);
             logger.step(`Explorer: https://testnet.pharosscan.xyz/tx/${receipt.hash}`);
@@ -585,18 +605,40 @@ const addLiquidity = async (wallet, provider, index, jwt, proxy) => {
         await tryWithRetry(action, actionName);
     } catch (error) {
         logger.error(`${actionName} failed (Outer Catch): ${error.message}`);
-         if (error.data) logger.error(`Error data: ${error.data}`); // Log additional error data if present
+         if (error.data) logger.error(`Error data: ${error.data}`); 
     }
 };
 
-const getUserDelay = () => { /* ... sama ... */ };
-const countdown = async (minutes) => { /* ... sama ... */ };
+const getUserDelay = () => {
+  let delayMinutes = process.env.DELAY_MINUTES;
+  if (!delayMinutes) {
+    delayMinutes = prompt('Enter delay between cycles in minutes (e.g., 30): ');
+  }
+  const minutes = parseInt(delayMinutes, 10);
+  if (isNaN(minutes) || minutes <= 0) {
+    logger.warn('Invalid delay input, using default 30 minutes.');
+    return 30;
+  }
+  logger.info(`Delay between cycles set to ${minutes} minutes.`);
+  return minutes;
+};
+
+const countdown = async (minutes) => {
+  const totalSeconds = minutes * 60;
+  logger.info(`Starting ${minutes}-minute countdown for next cycle...`);
+  for (let seconds = totalSeconds; seconds >= 0; seconds--) {
+    const mins = Math.floor(seconds / 60);
+    const secs = seconds % 60;
+    process.stdout.write(`\r${colors.cyan}Time remaining: ${mins}m ${secs}s${colors.reset} `);
+    await sleep(1000);
+  }
+  process.stdout.write('\rCountdown complete! Restarting process...\n\n');
+};
 
 // --- Fungsi Main ---
 const main = async () => {
     logger.banner();
     const delayMinutes = getUserDelay();
-    logger.info(`Delay between cycles set to ${delayMinutes} minutes.`);
 
     const proxies = loadProxies();
     const privateKeys = [process.env.PRIVATE_KEY_1, process.env.PRIVATE_KEY_2].filter(pk => pk && pk.trim() !== '');
@@ -610,17 +652,18 @@ const main = async () => {
     const numWraps = parseInt(process.env.NUM_WRAPS) || 2;
     const numSwaps = parseInt(process.env.NUM_SWAPS) || 2;
     const numLPs = parseInt(process.env.NUM_LPS) || 1;
-    logger.info(`Actions/wallet: T=${numTransfers}, W=${numWraps}, S=${numSwaps}, LP=${numLPs}`);
+    logger.info(`Actions/wallet: Transfers=${numTransfers}, Wraps=${numWraps}, Swaps=${numSwaps}, LPs=${numLPs}`);
 
-    const delayActionsMin = parseInt(process.env.DELAY_ACTIONS_MIN_MS) || 10000; // 10s
-    const delayActionsMax = parseInt(process.env.DELAY_ACTIONS_MAX_MS) || 20000; // 20s
-    const delayWallets = parseInt(process.env.DELAY_WALLETS_MS) || 30000; // 30s
+    const delayActionsMin = parseInt(process.env.DELAY_ACTIONS_MIN_MS) || 10000; 
+    const delayActionsMax = parseInt(process.env.DELAY_ACTIONS_MAX_MS) || 20000; 
+    const delayWallets = parseInt(process.env.DELAY_WALLETS_MS) || 30000; 
 
     while (true) {
         for (let pkIdx = 0; pkIdx < privateKeys.length; pkIdx++) {
             const privateKey = privateKeys[pkIdx];
             const currentProxy = proxies.length ? getRandomProxy(proxies) : null;
-            const provider = setupProvider(currentProxy);
+            // Buat provider baru di setiap iterasi wallet untuk memastikan proxy (jika ada) diterapkan dengan benar
+            const provider = setupProvider(currentProxy); 
             const wallet = new ethers.Wallet(privateKey, provider);
             logger.wallet(`[Wallet ${pkIdx + 1}/${privateKeys.length}] Using: ${wallet.address.substring(0,10)}...`);
 
@@ -635,28 +678,43 @@ const main = async () => {
                     await getUserInfo(wallet, currentProxy, jwt);
                     await sleep(Math.random() * (delayActionsMax - delayActionsMin) + delayActionsMin);
                 } else {
-                    logger.warn('Skipping further actions requiring JWT for this wallet.');
+                    logger.warn('Skipping actions requiring JWT for this wallet due to failed check-in or login.');
                 }
-
-                if (numTransfers > 0 && jwt) { // JWT might be needed for verifyTask
-                    console.log(`\n${colors.cyan}--- TRANSFERS ---${colors.reset}`);
-                    for (let i = 0; i < numTransfers; i++) await transferPHRS(wallet, provider, i, jwt, currentProxy), await sleep(Math.random() * (delayActionsMax - delayActionsMin) + delayActionsMin);
-                }
-                if (numWraps > 0 && jwt) {
-                    console.log(`\n${colors.cyan}--- WRAP PHRS ---${colors.reset}`);
-                    for (let i = 0; i < numWraps; i++) await wrapPHRS(wallet, provider, i, jwt, currentProxy), await sleep(Math.random() * (delayActionsMax - delayActionsMin) + delayActionsMin);
-                }
-                if (numSwaps > 0 && jwt) {
-                    console.log(`\n${colors.cyan}--- SWAPS ---${colors.reset}`);
-                    for (let i = 0; i < numSwaps; i++) await performSwap(wallet, provider, i, jwt, currentProxy), await sleep(Math.random() * (delayActionsMax - delayActionsMin) + delayActionsMin);
-                }
-                if (numLPs > 0 && jwt) {
-                    console.log(`\n${colors.cyan}--- ADD LIQUIDITY ---${colors.reset}`);
-                    for (let i = 0; i < numLPs; i++) await addLiquidity(wallet, provider, i, jwt, currentProxy), await sleep(Math.random() * (delayActionsMax - delayActionsMin) + delayActionsMin);
+                
+                // Hanya lanjutkan jika JWT ada, karena verifyTask memerlukannya
+                if (jwt) {
+                    if (numTransfers > 0) { 
+                        console.log(`\n${colors.cyan}--- TRANSFERS ---${colors.reset}`);
+                        for (let i = 0; i < numTransfers; i++) {
+                            await transferPHRS(wallet, provider, i, jwt, currentProxy);
+                            await sleep(Math.random() * (delayActionsMax - delayActionsMin) + delayActionsMin);
+                        }
+                    }
+                    if (numWraps > 0) {
+                        console.log(`\n${colors.cyan}--- WRAP PHRS ---${colors.reset}`);
+                        for (let i = 0; i < numWraps; i++) {
+                            await wrapPHRS(wallet, provider, i, jwt, currentProxy);
+                            await sleep(Math.random() * (delayActionsMax - delayActionsMin) + delayActionsMin);
+                        }
+                    }
+                    if (numSwaps > 0) {
+                        console.log(`\n${colors.cyan}--- SWAPS ---${colors.reset}`);
+                        for (let i = 0; i < numSwaps; i++) {
+                            await performSwap(wallet, provider, i, jwt, currentProxy);
+                            await sleep(Math.random() * (delayActionsMax - delayActionsMin) + delayActionsMin);
+                        }
+                    }
+                    if (numLPs > 0) {
+                        console.log(`\n${colors.cyan}--- ADD LIQUIDITY ---${colors.reset}`);
+                        for (let i = 0; i < numLPs; i++) {
+                            await addLiquidity(wallet, provider, i, jwt, currentProxy);
+                            await sleep(Math.random() * (delayActionsMax - delayActionsMin) + delayActionsMin);
+                        }
+                    }
                 }
                 logger.success(`All actions for wallet ${wallet.address.substring(0,10)}... completed.`);
             } catch (walletError) {
-                logger.error(`Critical error for wallet ${wallet.address.substring(0,10)}...: ${walletError.message}. Moving to next.`);
+                logger.error(`Critical error processing wallet ${wallet.address.substring(0,10)}...: ${walletError.message}. Moving to next.`);
             }
             if (pkIdx < privateKeys.length - 1) {
                 logger.info(`Waiting ${delayWallets / 1000}s before next wallet...`);
