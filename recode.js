@@ -54,7 +54,7 @@ const logger = {
 // ⚙️ Konfigurasi & Konstanta
 // =============================================================================
 const API_BASE_URL = 'https://api.pharosnetwork.xyz';
-const INVITE_CODE = process.env.INVITE_CODE || 'S6NGMzXSCDBxhnwo';
+const INVITE_CODE = process.env.INVITE_CODE;
 const TASK_ID_INTERACTION = 103;
 const SIGN_MESSAGE_CONTENT = "pharos";
 
