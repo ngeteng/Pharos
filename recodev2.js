@@ -265,7 +265,7 @@ const apiClaimFaucet = async (walletAddress, jwt, proxy) => {
     } catch (error) { logger.error(`   ❌ Faucet claim process API request failed: ${error.message}`); return false; }
 };
 
-const apiVerifyTask = async (walletAddress, jwt, txHash, proxy, maxAttempts = 5, delayBetweenAttemptsMs = 20000) => {
+const apiVerifyTask = async (walletAddress, jwt, txHash, proxy, maxAttempts = 5, delayBetweenAttemptsMs = 30000) => { // <-- JEDA DEFAULT DIPERPANJANG
     if (!jwt) {
         logger.warn("  ⚠️ Skipping task verification: No JWT.");
         return false;
@@ -277,12 +277,9 @@ const apiVerifyTask = async (walletAddress, jwt, txHash, proxy, maxAttempts = 5,
     for (let attempt = 1; attempt <= maxAttempts; attempt++) {
         logger.info(`    Attempt ${attempt}/${maxAttempts}...`);
         try {
-            // Kita tetap bisa menggunakan retryOperation untuk menangani error jaringan/HTTP dasar
             const response = await retryOperation(
                 () => axios(getAxiosConfig('post', url, jwt, proxy)),
-                2, // Cukup 2 retry di sini, loop utama yang menangani 'kesabaran'
-                3000,
-                `API Verify Call Attempt ${attempt}`
+                2, 3000, `API Verify Call Attempt ${attempt}`
             );
 
             const data = response.data;
@@ -297,27 +294,27 @@ const apiVerifyTask = async (walletAddress, jwt, txHash, proxy, maxAttempts = 5,
             // 2. Sudah Diverifikasi Sebelumnya
             if (msg.includes("already verified") || msg.includes("task has been completed")) {
                 logger.info(`    👍 Task ${txHash.slice(0, 10)} was already verified.`);
-                return true; // Anggap sukses jika sudah pernah
+                return true;
             }
 
             // 3. Error Definitif (TX Salah, dll.)
-            const isReceiptFail = msg.includes("get transa") && msg.includes("receipt failed"); // Cek error spesifik ini (handle typo)
-            if (!isReceiptFail && (msg.includes("invalid") || (data.code !== 0 && !msg.includes("pending")))) { // <-- BARIS BARU: Jangan berhenti jika hanya 'receipt failed'
+            const isReceiptFail = msg.includes("get transaction receipt failed");
+            const isHashFail = msg.includes("get transaction hash failed"); // <-- BARIS BARU
+            // Jangan berhenti jika itu 'receipt failed' ATAU 'hash failed'
+            if (!isReceiptFail && !isHashFail && (msg.includes("invalid") || (data.code !== 0 && !msg.includes("pending")))) { // <-- BARIS DIMODIFIKASI
                  logger.error(`    ❌ Task verification failed with definitive message: "${data.msg}". Stopping attempts.`);
                  return false;
             }
 
-            // 4. Belum Siap / Pending (Kasus paling umum)
+            // 4. Belum Siap / Pending / Receipt Failed / Hash Failed
             logger.warn(`    ⚠️ Verification attempt ${attempt} - API: "${data.msg || 'Pending/Not yet verified'}".`);
 
-            // Jika bukan upaya terakhir, tunggu
             if (attempt < maxAttempts) {
                 logger.loading(`    ⏳ Waiting ${delayBetweenAttemptsMs / 1000}s before next attempt...`);
                 await delay(delayBetweenAttemptsMs);
             }
 
         } catch (error) {
-            // Ini menangkap error dari retryOperation (error jaringan/HTTP parah)
             logger.error(`    ❌ Network/Request error during attempt ${attempt}: ${error.message.slice(0, 100)}...`);
             if (attempt < maxAttempts) {
                 logger.loading(`    ⏳ Waiting ${delayBetweenAttemptsMs / 1000}s after error...`);
@@ -417,15 +414,14 @@ const checkBalanceAndApproveFull = async (wallet, tokenSymbol, balanceToApprove,
     }
 }
 
-
 const executeTransaction = async (fnName, contractInteraction, operationDescription, wallet, jwt, proxy) => {
     try {
         const txResponse = await contractInteraction();
         const receipt = await waitForTransactionReceipt(txResponse, operationDescription);
 
         if (receipt && jwt) {
-            // --- TAMBAHKAN JEDA AWAL DI SINI ---
-            const initialVerificationDelay = 10000; // 10 detik (atau sesuai kebutuhan)
+            // --- JEDA AWAL DIPERPANJANG JADI 30 DETIK ---
+            const initialVerificationDelay = 30000; // 30 detik
             logger.loading(`  ⏳ Waiting ${initialVerificationDelay / 1000}s before starting API verification process...`);
             await delay(initialVerificationDelay);
             // --- PANGGIL FUNGSI BARU ---
@@ -434,7 +430,6 @@ const executeTransaction = async (fnName, contractInteraction, operationDescript
         return receipt;
     } catch (error) {
         logger.error(`  ❌ ${operationDescription} execution failed: ${error.message}`);
-        // Log more details if needed, but keep it concise for now
         return null;
     }
 };
