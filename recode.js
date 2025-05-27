@@ -717,8 +717,15 @@ const processSingleWallet = async (privateKey, proxy, config) => {
             }
         } catch (unwrapError) {
              logger.error(`  ❌ An error occurred during the unwrap process: ${unwrapError.message}`);
-        } finally {
-            if (provider && typeof provider.destroy === 'function') {
+        }
+
+        logger.success(`✅ All actions completed for ${wallet.address}`);
+
+    } catch (error) {
+        logger.error(`🚨 An critical error occurred while processing ${wallet.address}: ${error.message}`);
+        console.error(error);
+    } finally {
+        if (provider && typeof provider.destroy === 'function') {
             provider.destroy();
         }
     }
