@@ -265,20 +265,66 @@ const apiClaimFaucet = async (walletAddress, jwt, proxy) => {
     } catch (error) { logger.error(`   ❌ Faucet claim process API request failed: ${error.message}`); return false; }
 };
 
-const apiVerifyTask = async (walletAddress, jwt, txHash, proxy) => {
-    if (!jwt) { logger.warn("   ⚠️ Skipping task verification: No JWT."); return false; }
-    logger.api(`   🔍 Verifying task for TX: ${txHash.slice(0, 10)}...`);
+const apiVerifyTask = async (walletAddress, jwt, txHash, proxy, maxAttempts = 5, delayBetweenAttemptsMs = 30000) => { // <-- JEDA DEFAULT DIPERPANJANG
+    if (!jwt) {
+        logger.warn("  ⚠️ Skipping task verification: No JWT.");
+        return false;
+    }
+
+    logger.api(`  🔍 Verifying task for TX: ${txHash.slice(0, 10)}... (Up to ${maxAttempts} attempts, delay: ${delayBetweenAttemptsMs / 1000}s)`);
     const url = `${API_BASE_URL}/task/verify?address=${walletAddress}&task_id=${TASK_ID_INTERACTION}&tx_hash=${txHash}`;
-    try {
-        const response = await retryOperation(() => axios(getAxiosConfig('post', url, jwt, proxy)), 3, 3000, `Task Verification ${txHash.slice(0, 10)}`);
-        if (response.data.code === 0 && response.data.data.verified) {
-            logger.success(`   ✔️ Task verified successfully for ${txHash.slice(0, 10)}...`);
-            return true;
-        } else {
-            logger.warn(`   ⚠️ Task verification for ${txHash.slice(0,10)} failed or pending: ${response.data.msg || 'Unknown error'}`);
-            return false;
+
+    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+        logger.info(`    Attempt ${attempt}/${maxAttempts}...`);
+        try {
+            const response = await retryOperation(
+                () => axios(getAxiosConfig('post', url, jwt, proxy)),
+                2, 3000, `API Verify Call Attempt ${attempt}`
+            );
+
+            const data = response.data;
+            const msg = (data.msg || 'Unknown API status').toLowerCase();
+
+            // 1. Sukses Verifikasi!
+            if (data.code === 0 && data.data && data.data.verified) {
+                logger.success(`    ✔️ Task verified successfully for ${txHash.slice(0, 10)}!`);
+                return true;
+            }
+
+            // 2. Sudah Diverifikasi Sebelumnya
+            if (msg.includes("already verified") || msg.includes("task has been completed")) {
+                logger.info(`    👍 Task ${txHash.slice(0, 10)} was already verified.`);
+                return true;
+            }
+
+            // 3. Error Definitif (TX Salah, dll.)
+            const isReceiptFail = msg.includes("get transaction receipt failed");
+            const isHashFail = msg.includes("get transaction hash failed"); // <-- BARIS BARU
+            // Jangan berhenti jika itu 'receipt failed' ATAU 'hash failed'
+            if (!isReceiptFail && !isHashFail && (msg.includes("invalid") || (data.code !== 0 && !msg.includes("pending")))) { // <-- BARIS DIMODIFIKASI
+                 logger.error(`    ❌ Task verification failed with definitive message: "${data.msg}". Stopping attempts.`);
+                 return false;
+            }
+
+            // 4. Belum Siap / Pending / Receipt Failed / Hash Failed
+            logger.warn(`    ⚠️ Verification attempt ${attempt} - API: "${data.msg || 'Pending/Not yet verified'}".`);
+
+            if (attempt < maxAttempts) {
+                logger.loading(`    ⏳ Waiting ${delayBetweenAttemptsMs / 1000}s before next attempt...`);
+                await delay(delayBetweenAttemptsMs);
+            }
+
+        } catch (error) {
+            logger.error(`    ❌ Network/Request error during attempt ${attempt}: ${error.message.slice(0, 100)}...`);
+            if (attempt < maxAttempts) {
+                logger.loading(`    ⏳ Waiting ${delayBetweenAttemptsMs / 1000}s after error...`);
+                await delay(delayBetweenAttemptsMs);
+            }
         }
-    } catch (error) { return false; }
+    }
+
+    logger.error(`  ❌ Task verification FAILED for ${txHash.slice(0, 10)} after ${maxAttempts} attempts.`);
+    return false;
 };
 
 const apiGetUserInfo = async (walletAddress, jwt, proxy) => {
@@ -368,18 +414,22 @@ const checkBalanceAndApproveFull = async (wallet, tokenSymbol, balanceToApprove,
     }
 }
 
-
 const executeTransaction = async (fnName, contractInteraction, operationDescription, wallet, jwt, proxy) => {
     try {
         const txResponse = await contractInteraction();
         const receipt = await waitForTransactionReceipt(txResponse, operationDescription);
+
         if (receipt && jwt) {
-            await apiVerifyTask(wallet.address, jwt, receipt.hash, proxy);
+            // --- JEDA AWAL DIPERPANJANG JADI 30 DETIK ---
+            const initialVerificationDelay = 30000; // 30 detik
+            logger.loading(`  ⏳ Waiting ${initialVerificationDelay / 1000}s before starting API verification process...`);
+            await delay(initialVerificationDelay);
+            // --- PANGGIL FUNGSI BARU ---
+            await apiVerifyTask(wallet.address, jwt, receipt.hash, proxy); // Memanggil apiVerifyTask yang sudah diupdate
         }
         return receipt;
     } catch (error) {
-        logger.error(`   ❌ ${operationDescription} execution failed: ${error.message}`);
-        // Log more details if needed, but keep it concise for now
+        logger.error(`  ❌ ${operationDescription} execution failed: ${error.message}`);
         return null;
     }
 };
@@ -532,6 +582,56 @@ const actionSwapBackToWPHRS = async (wallet, jwt, proxy) => {
     }
 };
 
+const actionUnwrapWPHRS = async (wallet, amountToUnwrapString, jwt = null, proxy = null) => {
+    // Gunakan string asli untuk log agar konsisten
+    const operation = `Unwrap ${amountToUnwrapString} WPHRS`;
+    logger.step(`💰 Preparing ${operation}...`);
+
+    try {
+        const wphrsContract = new ethers.Contract(tokens.WPHRS, erc20Abi, wallet);
+        const wphrsDecimals = tokenDecimals.WPHRS;
+
+        // 1. Parse amount dari STRING
+        const amountWei = ethers.parseUnits(amountToUnwrapString, wphrsDecimals);
+
+        // 2. Cek Saldo WPHRS (tetap cek untuk keamanan)
+        const balance = await wphrsContract.balanceOf(wallet.address);
+
+        // PENTING: Bandingkan balance >= amountWei.
+        // Jika karena suatu hal amountWei lebih besar (seharusnya tidak terjadi lagi),
+        // maka kita unwrap saja SEMUA balance yang ada.
+        let finalAmountToUnwrap = amountWei;
+        if (balance < amountWei) {
+            logger.warn(`  ⚠️ Requested amount (${amountToUnwrapString}) slightly > balance. Unwrapping full balance: ${ethers.formatUnits(balance, wphrsDecimals)}`);
+            finalAmountToUnwrap = balance; // Gunakan balance asli jika < amountWei
+        }
+
+        // Pastikan kita tidak mencoba unwrap 0 (gunakan 0n untuk BigInt)
+        if (finalAmountToUnwrap === 0n) {
+             logger.info(`  ℹ️ WPHRS balance is zero, skipping unwrap.`);
+             return;
+        }
+
+        logger.info(`  💰 WPHRS Balance: ${ethers.formatUnits(balance, wphrsDecimals)}. Unwrapping ${ethers.formatUnits(finalAmountToUnwrap, wphrsDecimals)}...`);
+
+        // 3. Estimasi Gas & Kirim Transaksi
+        const estimatedGas = await wphrsContract.withdraw.estimateGas(finalAmountToUnwrap);
+        const txOptions = await getTransactionOptions(wallet.provider, estimatedGas);
+
+        // 4. Eksekusi Transaksi
+        await executeTransaction(
+            operation,
+            () => wphrsContract.withdraw(finalAmountToUnwrap, txOptions),
+            operation,
+            wallet,
+            jwt,
+            proxy
+        );
+
+    } catch (error) {
+        logger.error(`  ❌ Error in ${operation}: ${error.message}`);
+    }
+};
 
 // =============================================================================
 // 🎬 Fungsi Utama & Alur Eksekusi
@@ -583,21 +683,42 @@ const processSingleWallet = async (privateKey, proxy, config) => {
         }
 
         logger.separator("BLOCKCHAIN ACTIONS");
-        for (let i = 0; i < config.numTransfers; i++) { await actionTransferPHRS(wallet, i, jwt, proxy); await delay(config.delayBetweenActionsMs); }
-        for (let i = 0; i < config.numWraps; i++) { await actionWrapPHRS(wallet, i, jwt, proxy); await delay(config.delayBetweenActionsMs); }
-        for (let i = 0; i < config.numSwaps; i++) { await actionPerformSwap(wallet, i, jwt, proxy); await delay(config.delayBetweenActionsMs); }
-        for (let i = 0; i < config.numLPs; i++) { await actionAddLiquidity(wallet, i, jwt, proxy); await delay(config.delayBetweenActionsMs); }
+        //for (let i = 0; i < config.numTransfers; i++) { await actionTransferPHRS(wallet, i, jwt, proxy); await delay(config.delayBetweenActionsMs); }
+        //for (let i = 0; i < config.numWraps; i++) { await actionWrapPHRS(wallet, i, jwt, proxy); await delay(config.delayBetweenActionsMs); }
+        //for (let i = 0; i < config.numSwaps; i++) { await actionPerformSwap(wallet, i, jwt, proxy); await delay(config.delayBetweenActionsMs); }
+        //for (let i = 0; i < config.numLPs; i++) { await actionAddLiquidity(wallet, i, jwt, proxy); await delay(config.delayBetweenActionsMs); }
 
         logger.separator("SWAP BACK TO WPHRS");
-        await actionSwapBackToWPHRS(wallet, jwt, proxy); // Panggil fungsi baru di sini
+        await actionSwapBackToWPHRS(wallet, jwt, proxy);
+        await delay(config.delayBetweenActionsMs);
 
-        logger.success(`✅ All actions completed for ${wallet.address}`);
+        logger.separator("UNWRAP WPHRS TO PHRS");
+        try {
+            const wphrsContractInstance = new ethers.Contract(tokens.WPHRS, erc20Abi, wallet);
+            const wphrsBalanceBigInt = await wphrsContractInstance.balanceOf(wallet.address);
+            const wphrsDecimals = tokenDecimals.WPHRS;
 
-    } catch (error) {
-        logger.error(`🚨 An critical error occurred while processing ${wallet.address}: ${error.message}`);
-        console.error(error);
-    } finally {
-        if (provider && typeof provider.destroy === 'function') {
+            // Tentukan batas minimal WPHRS untuk di-unwrap (dalam bentuk string agar mudah di-parse)
+            const minUnwrapAmountString = "0.001";
+            const minUnwrapAmountBigInt = ethers.parseUnits(minUnwrapAmountString, wphrsDecimals);
+
+            // Bandingkan menggunakan BigInt
+            if (wphrsBalanceBigInt > minUnwrapAmountBigInt) {
+                // Konversi saldo BigInt ke String untuk dikirim dan di-log
+                const wphrsBalanceString = ethers.formatUnits(wphrsBalanceBigInt, wphrsDecimals);
+                logger.info(`  ℹ️ Found ${wphrsBalanceString} WPHRS. Attempting to unwrap...`);
+
+                // Panggil fungsi unwrap, KIRIMKAN STRING ASLINYA
+                await actionUnwrapWPHRS(wallet, wphrsBalanceString, jwt, proxy);
+                await delay(config.delayBetweenActionsMs);
+            } else {
+                const wphrsBalanceString = ethers.formatUnits(wphrsBalanceBigInt, wphrsDecimals);
+                logger.info(`  ℹ️ WPHRS balance (${wphrsBalanceString}) is too low, skipping unwrap.`);
+            }
+        } catch (unwrapError) {
+             logger.error(`  ❌ An error occurred during the unwrap process: ${unwrapError.message}`);
+        } finally {
+            if (provider && typeof provider.destroy === 'function') {
             provider.destroy();
         }
     }
