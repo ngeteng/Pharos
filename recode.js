@@ -683,10 +683,10 @@ const processSingleWallet = async (privateKey, proxy, config) => {
         }
 
         logger.separator("BLOCKCHAIN ACTIONS");
-        //for (let i = 0; i < config.numTransfers; i++) { await actionTransferPHRS(wallet, i, jwt, proxy); await delay(config.delayBetweenActionsMs); }
-        //for (let i = 0; i < config.numWraps; i++) { await actionWrapPHRS(wallet, i, jwt, proxy); await delay(config.delayBetweenActionsMs); }
-        //for (let i = 0; i < config.numSwaps; i++) { await actionPerformSwap(wallet, i, jwt, proxy); await delay(config.delayBetweenActionsMs); }
-        //for (let i = 0; i < config.numLPs; i++) { await actionAddLiquidity(wallet, i, jwt, proxy); await delay(config.delayBetweenActionsMs); }
+        for (let i = 0; i < config.numTransfers; i++) { await actionTransferPHRS(wallet, i, jwt, proxy); await delay(config.delayBetweenActionsMs); }
+        for (let i = 0; i < config.numWraps; i++) { await actionWrapPHRS(wallet, i, jwt, proxy); await delay(config.delayBetweenActionsMs); }
+        for (let i = 0; i < config.numSwaps; i++) { await actionPerformSwap(wallet, i, jwt, proxy); await delay(config.delayBetweenActionsMs); }
+        for (let i = 0; i < config.numLPs; i++) { await actionAddLiquidity(wallet, i, jwt, proxy); await delay(config.delayBetweenActionsMs); }
 
         logger.separator("SWAP BACK TO WPHRS");
         //await actionSwapBackToWPHRS(wallet, jwt, proxy);
