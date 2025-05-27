@@ -582,6 +582,44 @@ const actionSwapBackToWPHRS = async (wallet, jwt, proxy) => {
     }
 };
 
+const actionUnwrapWPHRS = async (wallet, amountToUnwrap, jwt = null, proxy = null) => {
+    const operation = `Unwrap ${amountToUnwrap} WPHRS`;
+    logger.step(`💰 Preparing ${operation}...`);
+
+    try {
+        const wphrsContract = new ethers.Contract(tokens.WPHRS, erc20Abi, wallet);
+        const wphrsDecimals = tokenDecimals.WPHRS; // Asumsi 18
+
+        // 1. Cek Saldo WPHRS
+        const balance = await wphrsContract.balanceOf(wallet.address);
+        const amountWei = ethers.parseUnits(amountToUnwrap.toString(), wphrsDecimals);
+
+        if (balance < amountWei) {
+            logger.warn(`  ⚠️ Skipping ${operation}: Insufficient WPHRS balance. Have: ${ethers.formatUnits(balance, wphrsDecimals)}, Need: ${amountToUnwrap}`);
+            return;
+        }
+        logger.info(`  💰 WPHRS Balance: ${ethers.formatUnits(balance, wphrsDecimals)}. Unwrapping ${amountToUnwrap}...`);
+
+        // 2. Tidak Perlu Approve (karena kita burn token sendiri)
+
+        // 3. Estimasi Gas & Kirim Transaksi
+        const estimatedGas = await wphrsContract.withdraw.estimateGas(amountWei);
+        const txOptions = await getTransactionOptions(wallet.provider, estimatedGas);
+
+        // 4. Eksekusi Transaksi (menggunakan helper Anda)
+        await executeTransaction(
+            operation,
+            () => wphrsContract.withdraw(amountWei, txOptions),
+            operation,
+            wallet,
+            jwt, // Teruskan jwt jika unwrap juga perlu diverifikasi
+            proxy
+        );
+
+    } catch (error) {
+        logger.error(`  ❌ Error in ${operation}: ${error.message}`);
+    }
+};
 
 // =============================================================================
 // 🎬 Fungsi Utama & Alur Eksekusi
@@ -639,7 +677,29 @@ const processSingleWallet = async (privateKey, proxy, config) => {
         for (let i = 0; i < config.numLPs; i++) { await actionAddLiquidity(wallet, i, jwt, proxy); await delay(config.delayBetweenActionsMs); }
 
         logger.separator("SWAP BACK TO WPHRS");
-        await actionSwapBackToWPHRS(wallet, jwt, proxy); // Panggil fungsi baru di sini
+        await actionSwapBackToWPHRS(wallet, jwt, proxy);
+        await delay(config.delayBetweenActionsMs);
+
+        logger.separator("UNWRAP WPHRS TO PHRS");
+        try {
+            const wphrsContractInstance = new ethers.Contract(tokens.WPHRS, erc20Abi, wallet);
+            const wphrsBalanceBigInt = await wphrsContractInstance.balanceOf(wallet.address);
+            const wphrsDecimals = tokenDecimals.WPHRS;
+            const wphrsBalanceString = ethers.formatUnits(wphrsBalanceBigInt, wphrsDecimals);
+            const wphrsBalanceFloat = parseFloat(wphrsBalanceString);
+
+            const minUnwrapAmount = 0.001;
+
+            if (wphrsBalanceFloat > minUnwrapAmount) {
+                logger.info(`  ℹ️ Found ${wphrsBalanceString} WPHRS. Attempting to unwrap...`);
+                await actionUnwrapWPHRS(wallet, wphrsBalanceFloat, jwt, proxy);
+                await delay(config.delayBetweenActionsMs);
+            } else {
+                logger.info(`  ℹ️ WPHRS balance (${wphrsBalanceString}) is too low, skipping unwrap.`);
+            }
+        } catch (unwrapError) {
+             logger.error(`  ❌ An error occurred during the unwrap process: ${unwrapError.message}`);
+        }
 
         logger.success(`✅ All actions completed for ${wallet.address}`);
 
