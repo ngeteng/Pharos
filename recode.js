@@ -689,8 +689,8 @@ const processSingleWallet = async (privateKey, proxy, config) => {
         //for (let i = 0; i < config.numLPs; i++) { await actionAddLiquidity(wallet, i, jwt, proxy); await delay(config.delayBetweenActionsMs); }
 
         logger.separator("SWAP BACK TO WPHRS");
-        await actionSwapBackToWPHRS(wallet, jwt, proxy);
-        await delay(config.delayBetweenActionsMs);
+        //await actionSwapBackToWPHRS(wallet, jwt, proxy);
+        //await delay(config.delayBetweenActionsMs);
 
         logger.separator("UNWRAP WPHRS TO PHRS");
         try {
