@@ -84,15 +84,15 @@ const positionManagerAbi = [{"inputs":[{"components":[{"internalType":"address",
 // --- Opsi Transaksi ---
 const swapPairOptions = [
     { from: 'WPHRS', to: 'USDC', amount: 0.01 }, { from: 'WPHRS', to: 'USDT', amount: 0.01 },
-    { from: 'USDC', to: 'WPHRS', amount: 0.01 }, { from: 'USDT', to: 'WPHRS', amount: 0.001 },
-    { from: 'USDC', to: 'USDT', amount: 0.01 }, { from: 'USDT', to: 'USDC', amount: 0.001 },
+    { from: 'USDC', to: 'WPHRS', amount: 0.01 }, { from: 'USDT', to: 'WPHRS', amount: 0.01 },
+    { from: 'USDC', to: 'USDT', amount: 0.01 }, { from: 'USDT', to: 'USDC', amount: 0.01 },
 ];
 const lpPairOptions = [
-    { token0: 'WPHRS', token1: 'USDC', amount0: 0.001, amount1: 0.001, fee: 3000 },
-    { token0: 'WPHRS', token1: 'USDT', amount0: 0.001, amount1: 0.001, fee: 3000 },
+    { token0: 'WPHRS', token1: 'USDC', amount0: 0.01, amount1: 0.01, fee: 3000 },
+    { token0: 'WPHRS', token1: 'USDT', amount0: 0.01, amount1: 0.01, fee: 3000 },
 ];
 const transferAmountPHRS = 0.000001;
-const wrapAmountPHRS = { min: 0.01, max: 0.05 };
+const wrapAmountPHRS = { min: 0.05, max: 0.1 };
 
 // =============================================================================
 // 🛠️ Fungsi Utilitas & Pembantu
