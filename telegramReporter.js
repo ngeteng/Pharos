@@ -15,10 +15,24 @@ const reportToTelegram = async (logger, walletAddress, userInfo) => {
         return;
     }
 
+    // --- AWAL PERUBAHAN ---
+    // Fungsi untuk memotong alamat wallet
+    const truncateWalletAddress = (address, startChars = 6, endChars = 4) => {
+        if (!address || address.length <= startChars + endChars) {
+            return address; // Kembalikan alamat asli jika terlalu pendek
+        }
+        const start = address.substring(0, startChars);
+        const end = address.substring(address.length - endChars);
+        return `${start}...${end}`;
+    };
+
+    const truncatedWalletAddress = truncateWalletAddress(walletAddress); // Panggil fungsi di sini
+    // --- AKHIR PERUBAHAN ---
+
     const message = `
 🤖 *Pharos Bot Report* 🤖
 -------------------------
-**Alamat Wallet:** \`${walletAddress}\`
+**Alamat Wallet:** \`${truncatedWalletAddress}\`  // Gunakan alamat yang sudah dipotong
 **User ID:** ${userInfo.ID || 'N/A'}
 **Task Points:** ${userInfo.TaskPoints !== undefined ? userInfo.TaskPoints : 'N/A'}
 **Total Points:** ${userInfo.TotalPoints !== undefined ? userInfo.TotalPoints : 'N/A'}
