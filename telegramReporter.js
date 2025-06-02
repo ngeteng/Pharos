@@ -1,5 +1,25 @@
 require('dotenv').config();
-const axios = require('axios');
+const axios =require('axios');
+
+const truncateWalletAddress = (address, startChars = 6, endChars = 4) => {
+    if (!address || address.length <= startChars + endChars) {
+        return address;
+    }
+    const start = address.substring(0, startChars);
+    const end = address.substring(address.length - endChars);
+    return `${start}...${end}`;
+};
+
+const truncateUserId = (id, visibleChars = 2) => {
+    if (!id || (typeof id !== 'string' && typeof id !== 'number')) {
+        return 'N/A';
+    }
+    const idStr = String(id);
+    if (idStr.length <= visibleChars) {
+        return idStr;
+    }
+    return `...${idStr.substring(idStr.length - visibleChars)}`;
+};
 
 const reportToTelegram = async (logger, walletAddress, userInfo) => {
     const botToken = process.env.TELEGRAM_BOT_TOKEN;
@@ -15,25 +35,14 @@ const reportToTelegram = async (logger, walletAddress, userInfo) => {
         return;
     }
 
-    // --- AWAL PERUBAHAN ---
-    // Fungsi untuk memotong alamat wallet
-    const truncateWalletAddress = (address, startChars = 6, endChars = 4) => {
-        if (!address || address.length <= startChars + endChars) {
-            return address; // Kembalikan alamat asli jika terlalu pendek
-        }
-        const start = address.substring(0, startChars);
-        const end = address.substring(address.length - endChars);
-        return `${start}...${end}`;
-    };
-
-    const truncatedWalletAddress = truncateWalletAddress(walletAddress); // Panggil fungsi di sini
-    // --- AKHIR PERUBAHAN ---
+    const truncatedWalletAddress = truncateWalletAddress(walletAddress);
+    const truncatedUserId = truncateUserId(userInfo.ID);
 
     const message = `
 🤖 *Pharos Bot Report* 🤖
 -------------------------
 **Alamat Wallet:** \`${truncatedWalletAddress}\`
-**User ID:** ${userInfo.ID || 'N/A'}
+**User ID:** ${truncatedUserId}
 **Task Points:** ${userInfo.TaskPoints !== undefined ? userInfo.TaskPoints : 'N/A'}
 **Total Points:** ${userInfo.TotalPoints !== undefined ? userInfo.TotalPoints : 'N/A'}
 -------------------------
