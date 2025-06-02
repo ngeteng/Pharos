@@ -32,7 +32,7 @@ const reportToTelegram = async (logger, walletAddress, userInfo) => {
     const message = `
 🤖 *Pharos Bot Report* 🤖
 -------------------------
-**Alamat Wallet:** \`${truncatedWalletAddress}\`  // Gunakan alamat yang sudah dipotong
+**Alamat Wallet:** \`${truncatedWalletAddress}\`
 **User ID:** ${userInfo.ID || 'N/A'}
 **Task Points:** ${userInfo.TaskPoints !== undefined ? userInfo.TaskPoints : 'N/A'}
 **Total Points:** ${userInfo.TotalPoints !== undefined ? userInfo.TotalPoints : 'N/A'}
